@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include "stm32f030x6.h"
+#include "usart.h"
 
 #undef errno
 extern int  errno;
@@ -16,7 +18,7 @@ _write (int   file,
   /* Output character at at time */
   for (i = 0; i < nbytes; i++)
     {
-      // UART1_SendString (&buf[i], 1);
+      USART_putc(buf[i]);
     }
         
   return nbytes;

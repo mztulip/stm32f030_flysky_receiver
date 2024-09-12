@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include "stm32f030x6.h"
-#include "STM32F030-CMSIS-USART-lib.c"
+#include "usart.h"
 
 void init_spi_gpio(void)
 {
@@ -74,18 +74,18 @@ int main( void )
     GPIOB->MODER |= ( 0b01 << GPIO_MODER_MODER0_Pos );
 
     USART_init( USART1, 112500 );
-    printf("Hello");
-    USART_puts("Hello World!\n\r");
+    printf("Hell World printf\n\r");
     init_spi();
-    USART_puts("Spi initialised!\n\r");
+    printf("Spi initialised!\n\r");
     const uint8_t RScale = 0x31;
 
     while( 1 )
     {
         GPIOB->ODR ^= GPIO_ODR_0;
-        USART_puts("Test!\n");
+        printf("Test!\n\r");
         for( uint32_t x=0; x<308e3; x++) ;
         uint8_t rscale_val = A7105_read_reg(RScale);
+        printf("Rscale: %x", rscale_val);
         
     }
     return 0;

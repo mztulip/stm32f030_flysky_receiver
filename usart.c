@@ -52,12 +52,9 @@
 //      6. Enable (turn on) Tx, Rx, and USART via USART1->CR1
 //  ==========================================================================================
 
-#ifndef __STM32F030_CMSIS_USART_LIB_C
-#define __STM32F030_CMSIS_USART_LIB_C
-
 #include <stdlib.h>
-#include "stm32f030x6.h"  // Primary CMSIS header file
-
+#include "stm32f030x6.h"
+#include "usart.h"
 
 USART_TypeDef *USART_USART; // Global USART_USART varible to point to desired USART port
 
@@ -248,6 +245,3 @@ USART_gets( char *inStr, uint32_t strLen )
   inStr[ strPos ] = 0x00;                 // Terminate string with null character
   return strPos;                          // Return the length of the string not including
 }                                         // the end-of-string character
-
-
-#endif /* __STM32F030-CMSS_USART_LIB_C   */
