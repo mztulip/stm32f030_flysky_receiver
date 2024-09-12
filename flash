@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# Quick Flash script for STM32F0xx
+#openocd -f interface/stlink-v2.cfg -f target/stm32f0x.cfg -c "init;reset;init;halt"
+
+file=output.bin
+
+openocd -d0 \
+ -f interface/stlink-v2.cfg -f target/stm32f0x.cfg \
+ -c "init" -c "reset halt" \
+ -c "flash write_image erase $file 0x8000000" \
+ -c "verify_image $file" -c "reset" -c "shutdown"
