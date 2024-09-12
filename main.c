@@ -73,8 +73,9 @@ int main( void )
     GPIOB->MODER |= ( 0b01 << GPIO_MODER_MODER0_Pos );
 
     USART_init( USART1, 112500 );
-    USART_puts("Hello World!\n");
-
+    USART_puts("Hello World!\n\r");
+    init_spi();
+    USART_puts("Spi initialised!\n\r");
     const uint8_t RScale = 0x31;
 
     while( 1 )
