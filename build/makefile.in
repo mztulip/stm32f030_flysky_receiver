@@ -1,0 +1,69 @@
+TOOLCHAIN = /home/tulip/gcc-arm-none-eabi-10.3-2021.10-x86_64-linux/gcc-arm-none-eabi-10.3-2021.10/bin/arm-none-eabi-
+CC        = $(TOOLCHAIN)gcc
+AS        = $(TOOLCHAIN)as
+AR        = $(TOOLCHAIN)ar
+OBJCOPY   = $(TOOLCHAIN)objcopy
+
+COMMDIR  = ../
+LIBDIR   = ./objects
+
+# Making working directory under Linux
+$(shell mkdir -p $(LIBDIR))
+
+FLAGS    = -mthumb -mcpu=cortex-m0
+
+CFLAGS    += $(FLAGS) -O0 -c -Wall -g3 \
+             -mfloat-abi=soft \
+             -ffunction-sections -fdata-sections \
+	           -I$(COMMDIR) \
+             -I$(COMMDIR)/CMSIS/Device/ST/STM32F0xx/Include \
+             -I$(COMMDIR)/CMSIS/Include
+ASFLAGS   += $(FLAGS) -g -warn
+LDFLAGS   += $(FLAGS) -nostartfiles -L$(LIBDIR) -L$(COMMDIR) \
+             -TSTM32F030X6_FLASH.ld -Wl,--gc-sections --specs=nano.specs \
+             -Xlinker -Map=output.map
+
+CSRCS      = $(filter %.c, $(SOURCES))
+OBJECTS    = $(patsubst %.s, %.o, $(filter %.s, $(SOURCES))) \
+             $(patsubst %.c, %.o, $(filter %.c, $(SOURCES))) \
+             $(filter %.o, $(SOURCES))
+
+vpath %.c $(COMMDIR)
+vpath %.o $(LIBDIR)
+vpath %.s $(COMMDIR)
+
+.PHONY : all clean mkdir vars
+
+all : $(TARGETS)
+	@echo $(CSRCS) 
+	@echo $(OBJECTS)
+
+vars :
+	@echo $(CSRCS)
+	@echo $(OBJECTS)
+	@echo $(TARGETS)  
+
+%.o : %.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< -o $(LIBDIR)/$@
+
+%.o : %.s
+	$(AS) $(ASFLAGS) $< -o $(LIBDIR)/$@
+
+%.elf : $(OBJECTS)
+	$(CC) $(LDFLAGS) $(addprefix $(LIBDIR)/, $(OBJECTS)) \
+	-o $@
+
+%.hex : %.elf
+	$(OBJCOPY) $< $@ -O ihex
+
+%.bin : %.elf
+	$(OBJCOPY) $< $@ -O binary
+
+
+clean :
+	rm -f *.bin *.elf *.hex *.d *.o *.bak *~
+	rm -rf objects
+
+# Making working directory under Windows
+mkdir :
+	mkdir $(subst /,\,$(LIBDIR))

@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <stdio.h>
 #include "stm32f030x6.h"
 #include "STM32F030-CMSIS-USART-lib.c"
 
@@ -73,6 +74,7 @@ int main( void )
     GPIOB->MODER |= ( 0b01 << GPIO_MODER_MODER0_Pos );
 
     USART_init( USART1, 112500 );
+    printf("Hello");
     USART_puts("Hello World!\n\r");
     init_spi();
     USART_puts("Spi initialised!\n\r");
