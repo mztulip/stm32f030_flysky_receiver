@@ -3,40 +3,7 @@
 #include "stm32f030x6.h"
 #include "usart.h"
 
-void init_spi_gpio(void)
-{
-    RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
-    RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
-
-    // SCK PA5
-    GPIOA->MODER |= GPIO_MODER_MODER5_1;  // alternate function
-    // GPIOB->OTYPER default push-pull
-    // GPIOB->AFR[] default AF 0: SPI1_SCK,
-    // MOSI PA7
-    GPIOA->MODER |= GPIO_MODER_MODER7_1;  // alternate function
-    // MISO PA6
-    GPIOA->MODER |= GPIO_MODER_MODER6_1;  // alternate function
-
-    //SCS PA4 General purpose output mode
-    GPIOA->MODER |= ( 0b01 << GPIO_MODER_MODER0_Pos );
-    GPIOA->ODR |= GPIO_ODR_4; //Logic 1, deactivate SCS
-}
-
-void init_spi( void )
-{
-    init_spi_gpio();
-
-    SPI1->CR1 |= SPI_CR1_BR_1;            // spi_sck = SystemCoreClock / 8 = 6 MHz
-    SPI1->CR1 |= SPI_CR1_SSI;             // software CS
-    SPI1->CR2 |= SPI_CR2_DS_0 | SPI_CR2_DS_1 | SPI_CR2_DS_2| SPI_CR2_DS_3; //16bit
-
-    SPI1->CR1 |= SPI_CR1_SSM;
-    SPI1->CR1 |= SPI_CR1_SSI;
-    SPI1->CR1 |= SPI_CR1_MSTR | SPI_CR1_SPE;
-
-}
-
-void select_a7105(bool state)
+static inline void select_a7105(bool state)
 {
     if(state)
     {
@@ -48,44 +15,119 @@ void select_a7105(bool state)
     }
 }
 
+static inline void SCK_low(void)
+{
+    GPIOA->ODR &= ~GPIO_ODR_5; 
+}
+
+static inline void SCK_high(void)
+{
+    GPIOA->ODR |= GPIO_ODR_5; 
+}
+
+static inline void SDIO_output(void)
+{
+    GPIOA->MODER |= GPIO_MODER_MODER7_0;
+}
+
+static inline void SDIO_input(void)
+{
+    GPIOA->MODER &= ~GPIO_MODER_MODER7_Msk;
+}
+
+static inline bool SDIO_get_state(void)
+{
+    return ( GPIOA->ODR&GPIO_ODR_7) != 0;
+}
+
+static inline void SDIO_set_state(bool x)
+{
+    if(x)
+    {
+        GPIOA->ODR |= GPIO_ODR_7;
+    }
+    else 
+    {
+        GPIOA->ODR &= ~GPIO_ODR_7;
+    }
+}
+
+void init_3wire_gpio(void)
+{
+    RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
+    RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
+
+    // SCK PA5
+    GPIOA->MODER |= GPIO_MODER_MODER5_0;
+    // SDIO PA7
+    GPIOA->MODER |= GPIO_MODER_MODER7_0;
+    // GIO1 PA6
+    GPIOA->MODER |= GPIO_MODER_MODER6_0;
+    //SCS PA4 General purpose output mode
+    GPIOA->MODER |= ( 0b01 << GPIO_MODER_MODER4_Pos );
+
+    select_a7105(false);//Logic 1, deactivate SCS
+    SCK_low();
+}
+
+void A7105_write_reg(uint8_t address, uint8_t value)
+{ 
+    select_a7105(true);
+    //bit 7 command bit 0-register 1-strobe
+    //bit6 R/W bit 1-read 0 -write
+    uint16_t addr = address;
+    uint16_t data = addr << 8;
+    select_a7105(false);
+} 
+
 uint8_t A7105_read_reg(uint8_t address)
 { 
-	uint8_t result;
+	uint16_t result;
 
     select_a7105(true);
     //bit 7 command bit 0-register 1-strobe
     //bit6 R/W bit 1-read 0 -write
-    uint16_t data = address|=0x40;
-    SPI1->DR = data;
-    while(!(SPI1->SR & SPI_SR_TXE));      // make sure TX buffer is empty
-    while(SPI1->SR & SPI_SR_BSY);         // make sure SPI isn't busy
-    select_a7105(false);
-    result = SPI1->DR;
+    uint16_t addr = address;
+    uint16_t data = (addr|=0x40) << 8;
+ 
+    // printf("Result: 0x%x\n\r", result);
 	return(result); 
-} 
+}
+
+void led_init(void)
+{
+    //LED PB0
+    RCC->AHBENR |= RCC_AHBENR_GPIOBEN; 
+    GPIOB->MODER |= ( 0b01 << GPIO_MODER_MODER0_Pos );
+}
+
+void led_toogle(void)
+{
+    GPIOB->ODR ^= GPIO_ODR_0;
+}
 
 //STM32F030K6T6
 //    USART1_Tx = PA2 (pin 8)
 int main( void )
 {
-    //LED PB0
-    RCC->AHBENR |= RCC_AHBENR_GPIOBEN; 
-
-    GPIOB->MODER |= ( 0b01 << GPIO_MODER_MODER0_Pos );
-
+    led_init();
     USART_init( USART1, 112500 );
     printf("Hell World printf\n\r");
-    init_spi();
-    printf("Spi initialised!\n\r");
-    const uint8_t RScale = 0x31;
+    init_3wire_gpio();
+    printf("3wire initialised!\n\r");
+    const uint8_t RScale_reg = 0x31;
+    const uint8_t battery_detect_reg = 0x27;
 
     while( 1 )
     {
-        GPIOB->ODR ^= GPIO_ODR_0;
+        led_toogle();
         printf("Test!\n\r");
         for( uint32_t x=0; x<308e3; x++) ;
-        uint8_t rscale_val = A7105_read_reg(RScale);
-        printf("Rscale: %x", rscale_val);
+        // uint8_t val = A7105_read_reg(battery_detect_reg);
+        // printf("Battery: %x", val);
+        A7105_write_reg(RScale_reg, 1);
+        A7105_read_reg(RScale_reg);
+        // printf("Rscale: %x", val);
         
     }
     return 0;
