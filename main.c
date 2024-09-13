@@ -3,6 +3,21 @@
 #include "stm32f030x6.h"
 #include "usart.h"
 
+void printBits(size_t const size, void const * const ptr)
+{
+    unsigned char *b = (unsigned char*) ptr;
+    unsigned char byte;
+    int i, j;
+    
+    for (i = size-1; i >= 0; i--) {
+        for (j = 7; j >= 0; j--) {
+            byte = (b[i] >> j) & 1;
+            printf("%u", byte);
+        }
+    }
+    puts("\r");
+}
+
 static inline void select_a7105(bool state)
 {
     if(state)
@@ -37,7 +52,8 @@ static inline void SDIO_input(void)
 
 static inline bool SDIO_get_state(void)
 {
-    return ( GPIOA->ODR&GPIO_ODR_7) != 0;
+    // printf("0x%lx\n\r", GPIOA->IDR&GPIO_ODR_7);
+    return ( GPIOA->IDR&GPIO_ODR_7) != 0;
 }
 
 static inline void SDIO_set_state(bool x)
@@ -60,7 +76,7 @@ void init_3wire_gpio(void)
     // SCK PA5
     GPIOA->MODER |= GPIO_MODER_MODER5_0;
     // SDIO PA7
-    GPIOA->MODER |= GPIO_MODER_MODER7_0;
+    // GPIOA->MODER |= GPIO_MODER_MODER7_0;
     // GIO1 PA6
     GPIOA->MODER |= GPIO_MODER_MODER6_0;
     //SCS PA4 General purpose output mode
@@ -82,15 +98,34 @@ void A7105_write_reg(uint8_t address, uint8_t value)
 
 uint8_t A7105_read_reg(uint8_t address)
 { 
-	uint16_t result;
-
+	uint16_t result = 0;
+    select_a7105(false);
+    SCK_low();
+    SDIO_output();
+    SDIO_set_state(0);
     select_a7105(true);
     //bit 7 command bit 0-register 1-strobe
     //bit6 R/W bit 1-read 0 -write
-    uint16_t addr = address;
-    uint16_t data = (addr|=0x40) << 8;
- 
-    // printf("Result: 0x%x\n\r", result);
+    uint8_t addr = (address|=0x40);
+    for(int i = 0x80 ; i != 0;i=i>>1)
+    {
+        bool bit = i&addr;
+        SDIO_set_state(bit);
+        SCK_high();
+        SCK_low();
+    }
+    SDIO_input();
+    for(int i = 0x80 ; i != 0;i=i>>1)
+    {
+        SCK_high();
+        if(SDIO_get_state())
+        {
+            result |= i;
+        }
+        SCK_low();
+    }
+
+    select_a7105(false);
 	return(result); 
 }
 
@@ -121,13 +156,14 @@ int main( void )
     while( 1 )
     {
         led_toogle();
-        printf("Test!\n\r");
         for( uint32_t x=0; x<308e3; x++) ;
-        // uint8_t val = A7105_read_reg(battery_detect_reg);
-        // printf("Battery: %x", val);
-        A7105_write_reg(RScale_reg, 1);
-        A7105_read_reg(RScale_reg);
-        // printf("Rscale: %x", val);
+
+        uint8_t val;
+        val = A7105_read_reg(battery_detect_reg);
+        printf("Battery: %02x\n\r", val);
+        // A7105_write_reg(RScale_reg, 1);
+        val = A7105_read_reg(RScale_reg);
+        printf("Rscale: %02x\n\r", val);
         
     }
     return 0;
