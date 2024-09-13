@@ -88,11 +88,22 @@ void init_3wire_gpio(void)
 
 void A7105_write_reg(uint8_t address, uint8_t value)
 { 
+    select_a7105(false);
+    SCK_low();
+    SDIO_output();
+    SDIO_set_state(0);
     select_a7105(true);
     //bit 7 command bit 0-register 1-strobe
     //bit6 R/W bit 1-read 0 -write
     uint16_t addr = address;
-    uint16_t data = addr << 8;
+    uint16_t data = (addr << 8)| value;
+    for(int i = 0x8000 ; i != 0;i=i>>1)
+    {
+        bool bit = i&data;
+        SDIO_set_state(bit);
+        SCK_high();
+        SCK_low();
+    }
     select_a7105(false);
 } 
 
@@ -161,7 +172,7 @@ int main( void )
         uint8_t val;
         val = A7105_read_reg(battery_detect_reg);
         printf("Battery: %02x\n\r", val);
-        // A7105_write_reg(RScale_reg, 1);
+        A7105_write_reg(RScale_reg, 1);
         val = A7105_read_reg(RScale_reg);
         printf("Rscale: %02x\n\r", val);
         
