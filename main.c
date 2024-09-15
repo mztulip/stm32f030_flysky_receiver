@@ -218,6 +218,67 @@ void A7105_reset(void)
     A7105_write_reg(Mode_reg, 0);
 }
 
+void A7105_write_ID(uint32_t id)
+{
+    select_a7105(false);
+    SCK_low();
+    SDIO_output();
+    SDIO_set_state(0);
+    select_a7105(true);
+    //bit 7 command bit 0-register 1-strobe
+    //bit6 R/W bit 1-read 0 -write
+    uint8_t addr = ID_Data_reg;
+    for(int i = 0x80 ; i != 0;i=i>>1)
+    {
+        bool bit = i&addr;
+        SDIO_set_state(bit);
+        SCK_high();
+        SCK_low();
+    }
+
+    for(uint32_t i = 0x80000000 ; i != 0;i=i>>1)
+    {
+        bool bit = i&id;
+        SDIO_set_state(bit);
+        SCK_high();
+        SCK_low();
+    }
+    select_a7105(false);
+}
+
+uint32_t A7105_read_ID(void)
+{
+    uint32_t result = 0;
+    select_a7105(false);
+    SCK_low();
+    SDIO_output();
+    SDIO_set_state(0);
+    select_a7105(true);
+    //bit 7 command bit 0-register 1-strobe
+    //bit6 R/W bit 1-read 0 -write
+    uint8_t addr = (ID_Data_reg|0x40);
+    for(int i = 0x80 ; i != 0;i=i>>1)
+    {
+        bool bit = i&addr;
+        SDIO_set_state(bit);
+        SCK_high();
+        SCK_low();
+    }
+    SDIO_input();
+    for(uint32_t i = 0x80000000 ; i != 0;i=i>>1)
+    {
+        SCK_high();
+        if(SDIO_get_state())
+        {
+            result |= i;
+        }
+        SCK_low();
+    }
+
+    select_a7105(false);
+	return(result); 
+}
+
 void led_init(void)
 {
     //LED PB0
@@ -235,6 +296,7 @@ void A7105_init(void)
     A7105_reset();
     A7105_presence_test();
     delay();
+
     A7105_write_reg(0, 0xff); //As in A7105 Reference code for FIFO mode
     //Crystal A7105= 16MHz=Fxtal
     // FMS=1(FIFO mode) AIF=0(Auto IF offset for RX)
@@ -308,7 +370,7 @@ void A7105_init(void)
 
     A7105_write_reg(0x30, 0x01); //IFAT register, internal should be as is
     A7105_write_reg(0x31, 0x0f); //RScale, internal, should be as is
-    A7105_write_reg(0x32, 0); //Filter test register, internal, should be set as is
+    A7105_write_reg(0x32, 0xff); //Filter test register, internal, should be set as is
 
     A7105_strobe(A7105_STROBE_STANDBY);
 }
@@ -437,12 +499,24 @@ int main( void )
     A7105_init();
     A7105_calibrate();
 
+    A7105_write_ID(0x5475c52A);
+    printf("Reading ID\n\r");
+    uint32_t id_result = 0x12345678;
+    id_result = A7105_read_ID();
+    printf("\033[32mFrame id set to: %lx\033[0m\n\r", id_result);
+    if(id_result != 0x5475c52A)
+    {
+        printf("\033[31mError: Frame id set failed\033[0m\n\r");
+        //TODO reboot
+    }
+
     // A7105_continuous_TX_hops();
     A7105_strobe(A7105_STROBE_STANDBY);
     A7105_strobe(A7105_STROBE_RST_RDPTR);
     //Binding packets are received on ch0
     A7105_write_reg( PLL_reg1, 0x00); //Set Channel 0 it means 2400MHz+0
     A7105_strobe(A7105_STROBE_RX);
+    printf("Waiting for radio frame\n\r");
 
     while( 1 )
     {
