@@ -182,6 +182,12 @@ static inline void delay(void)
     for( uint32_t x=0; x<308e3; x++) ;
 }
 
+static inline void delay_fast(void)
+{
+    for( uint32_t x=0; x<100e3; x++) ;
+}
+
+
 void A7105_strobe(uint8_t cmd)
 {
      select_a7105(false);
@@ -369,6 +375,7 @@ void A7105_continuous_TX(void)
     printf("Mode reg(0x00): %02x\n\r", val);
     printf("Continuous TX activated\n\r");
 
+    //This hops with frequency beetwen 2.39985 and 2.40025
     while(1)
     {
         led_toogle();
@@ -376,6 +383,41 @@ void A7105_continuous_TX(void)
         delay();
     }
 }
+
+void A7105_continuous_TX_hops(void)
+{
+    //PA6-GIO1 as output
+    GPIOA->MODER |= ( 0b01 << GPIO_MODER_MODER6_Pos );
+
+    //Continuous TX test
+    //0b1000 0000 = 0x80
+    //FMS=0 direct mode FMT=0, WWSE=0, DCFC=0, AIF=0, ARSSI=0, DDPC=0(SDIO as modulation drive pin disabled)
+    A7105_write_reg(Mode_control_reg, 0x00);
+    A7105_write_reg( PLL_reg1, 0x00); //Set Channel 0 it means 2400MHz+0
+    A7105_write_reg(GIO1_Pin_Control_reg1, (0x9<<2)| 0x01); //TXD direct mode
+    A7105_strobe(A7105_STROBE_TX);
+    uint8_t val;
+    val = A7105_read_reg(Mode_reg);
+    printf("Mode reg(0x00): %02x\n\r", val);
+    printf("Continuous TX activated\n\r");
+
+
+    //This hops with frequency beetwen f0+-250khz
+    uint8_t channel = 0;
+    while(1)
+    {
+        led_toogle();
+        GPIOA->ODR ^= GPIO_ODR_6;
+        delay_fast();
+        GPIOA->ODR ^= GPIO_ODR_6;
+        delay_fast();
+        //Freq=2400+32*(CHN)/(4*(16+1))=2400+CHN*0.47MHz
+        //Max 0xa0(160) Fchmax=2400*160*0,47=2.4752MHz
+        A7105_write_reg( PLL_reg1, channel%0xa0);
+        channel++;
+    }
+}
+
 
 //STM32F030K6T6
 //USART1_Tx = PA2 (pin 8)
@@ -390,7 +432,7 @@ int main( void )
     A7105_init();
     A7105_calibrate();
 
-    A7105_continuous_TX();
+    A7105_continuous_TX_hops();
     
 
     while( 1 )
