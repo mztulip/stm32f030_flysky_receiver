@@ -142,11 +142,15 @@ uint8_t A7105_read_reg(uint8_t address)
 
 const uint8_t Mode_reg = 0x0;
 const uint8_t Mode_control_reg = 0x1;
+const uint8_t Calibration_control_reg = 0x02;
 const uint8_t ID_Data_reg = 0x06;
+const uint8_t PLL_reg1 = 0x0f;
 const uint8_t IDL_reg = 0x1F;
-const uint8_t RScale_reg = 0x31;
+const uint8_t VCO_current_calibration_reg = 0x24;
+const uint8_t VCO_single_band_cal_reg1 = 0x25;
+const uint8_t VCO_single_band_cal_reg2 = 0x26;
 const uint8_t battery_detect_reg = 0x27;
-
+const uint8_t RScale_reg = 0x31;
 
 enum A7105_Command {
     A7105_STROBE_SLEEP     = 0x80,
@@ -197,11 +201,9 @@ void A7105_strobe(uint8_t cmd)
     select_a7105(false);
 }
 
-bool A7105_reset(void)
+void A7105_reset(void)
 {
     A7105_write_reg(Mode_reg, 0);
-    delay();
-    A7105_strobe(A7105_STROBE_STANDBY);
 }
 
 void led_init(void)
@@ -216,19 +218,12 @@ void led_toogle(void)
     GPIOB->ODR ^= GPIO_ODR_0;
 }
 
-//STM32F030K6T6
-//USART1_Tx = PA2 (pin 8)
-int main( void )
+void A7105_init(void)
 {
-    led_init();
-    USART_init( USART1, 112500 );
-    printf("Hell World printf\n\r");
-    init_3wire_gpio();
-    printf("3wire initialised!\n\r");
-
-    A7105_presence_test();
     A7105_reset();
-    A7105_write_reg(0, 0); //As in A7105 Reference code for FIFO mode
+    A7105_presence_test();
+    delay();
+    A7105_write_reg(0, 0xff); //As in A7105 Reference code for FIFO mode
     //Crystal A7105= 16MHz=Fxtal
     // FMS=1(FIFO mode) AIF=0(Auto IF offset for RX)
     // ARSSI = 1( Enable RSSI measurement in RX mode)
@@ -247,12 +242,12 @@ int main( void )
     A7105_write_reg(12, 0x0D);  //GIO2 control reg, GIO2OE=1(enabled pin), GIO2S[3:0]=0b0011,there is no plan to use GIO2
     A7105_write_reg(13, 0x05);//Clock register, XS=1(Crystal), CGS=0 (disable internal 32MHz PLL)
     //CSC[1:0]=01(syclk divider Fsys=FMCLK/2=16MHz),GRC[3:0]=0b000(clock generation reference counter)
-    A7105_write_reg(14, 0x00);//Data rate register, Data rate = Fsysclk/32/(SDR+1), SDR=0
-    A7105_write_reg(15, 50); //PLL register 1, CHN[7:0]=50 (LO channel number)
+    A7105_write_reg(14, 0x00);//Data rate register, Data rate = Fsysclk/32/(SDR+1), SDR=0 Datarete=16MHz/32/1=0.5MHz
+    A7105_write_reg(15, 50); //PLL register 1, CHN[7:0]=50 (LO channel number), this is overwritten later
 
-    A7105_write_reg(0x10, 0x9e);//1001 1110, PLL register 2, BIP8=0, CHR[3:0]=0b1111 
-    //RRC[1:0]=0b00 DBL=1(FXREF=2xFxtal=32MHz=FMclk)
-    A7105_write_reg(0x11, 0x4b); //PLL register 3, BIP[7:0]=0x4b(LO base frequency integer part)
+    A7105_write_reg(0x10, 0x9e);//1001 1110, PLL register 2, BIP8=0, CHR[3:0]=0b1111(16) 
+    //RRC[1:0]=0b00(FPLL=Fxref/1=32MHz) DBL=1(FXREF=2xFxtal=32MHz=FMclk)     Freq=2400+32*50(CHN)/(4*(16+1))=2400+1600/68=2400+23
+    A7105_write_reg(0x11, 0x4b); //PLL register 3, BIP[7:0]=0x4b(LO base frequency integer part) 32MHz*75(0x4b)=2400MHz
     A7105_write_reg(0x12, 0x00); //PLL register 4, BFP[15:8]=0
     A7105_write_reg(0x13, 0x02); //PLL register 5, BFP[7:0]=2(LO base frequency fractional part)
     A7105_write_reg(0x14, 0x16); //TX register 1, FDP[2:0]=0b110(frequency deviation power setting)
@@ -303,11 +298,101 @@ int main( void )
     A7105_write_reg(0x31, 0x0f); //RScale, internal, should be as is
     A7105_write_reg(0x32, 0); //Filter test register, internal, should be set as is
 
+    A7105_strobe(A7105_STROBE_STANDBY);
+}
+
+void A7105_calibrate(void)
+{
+    //IF Filter Bank Calibration
+    A7105_write_reg( Calibration_control_reg, 0x01 );
+    while ( A7105_read_reg(Calibration_control_reg) ); //wait calibration end
+
+    //VCO Current Calibration manual, I found that others do it in that way.
+    A7105_write_reg(VCO_current_calibration_reg, 0x13);
+
+    //VCO Bank Calibration, VDD_A=1.3V, upper threshold, lowe 0.4V
+    A7105_write_reg(VCO_single_band_cal_reg2, 0x03B);
+
+
+    
+    //VCO Bank Calibrate channel 0x00
+    A7105_write_reg( PLL_reg1, 0x00); //Set Channel 0 it means 2400MHz+0
+    A7105_write_reg( Calibration_control_reg, 0x02); //VCO Calibration
+    printf("VCO calibration started with channel 0x0\n\r");
+    while ( A7105_read_reg(Calibration_control_reg) )//wait calibration end
+    {
+        delay();
+        printf("Waiting for calibraiton end\n\r");
+    } 
+    uint8_t vco_calibration0=A7105_read_reg(VCO_single_band_cal_reg1);
+    if(vco_calibration0&0x08)
+    {//VCBS=1 means calibration failed
+        printf("VCO calibration failed with ch0\n\r");
+    }
+    
+    
+    //VCO Bank Calibrate channel 0xA0
+    A7105_write_reg( PLL_reg1, 0xA0); //Set Channel 0xA0
+    A7105_write_reg( Calibration_control_reg, 0x02); //VCO Calibration
+    printf("VCO calibration started with channel 0xA0\n\r");
+    while ( A7105_read_reg(Calibration_control_reg) )//wait calibration end
+    {
+        delay();
+        printf("Waiting for calibraiton end\n\r");
+    } 
+    vco_calibration0=A7105_read_reg(VCO_single_band_cal_reg1);
+    if(vco_calibration0&0x08)
+    {//VCBS=1 means calibration failed
+        printf("VCO calibration failed with channel 0xA0\n\r");
+    }
+
+    //Switch to manual VCO bank calibration value MVBS=1, WHY?
+    // A7105_write_reg(VCO_single_band_cal_reg1,0x08);
+    printf("Calibrations finished\n\r");
+}
+
+void A7105_continuous_TX(void)
+{
+    //Continuous TX test
+    //0b1000 0000 = 0x80
+    //FMS=0 direct mode FMT=0, WWSE=0, DCFC=0, AIF=0, ARSSI=0, DDPC=1(SDIO as modulation drive pin)
+    A7105_write_reg(Mode_control_reg, 0x80);
+    A7105_write_reg( PLL_reg1, 0x00); //Set Channel 0 it means 2400MHz+0
+    A7105_strobe(A7105_STROBE_TX);
+
+    while(1)
+    {
+        led_toogle();
+        SDIO_set_state(0);
+        delay();
+        SDIO_set_state(1);
+        delay();
+        // uint8_t val;
+        // val = A7105_read_reg(Mode_reg);
+        // printf("Mode reg: %02x\n\r", val);
+    }
+}
+
+//STM32F030K6T6
+//USART1_Tx = PA2 (pin 8)
+int main( void )
+{
+    led_init();
+    USART_init( USART1, 112500 );
+    printf("Hell World printf\n\r");
+    init_3wire_gpio();
+    printf("3wire initialised!\n\r");
+    delay();
+    A7105_init();
+    A7105_calibrate();
+
+    A7105_continuous_TX();
+    
+
     while( 1 )
     {
         led_toogle();
         delay();
-
         uint8_t val;
         val = A7105_read_reg(battery_detect_reg);
         printf("Battery: %02x\n\r", val);
