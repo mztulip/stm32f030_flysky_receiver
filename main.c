@@ -144,6 +144,7 @@ const uint8_t Mode_reg = 0x0;
 const uint8_t Mode_control_reg = 0x1;
 const uint8_t Calibration_control_reg = 0x02;
 const uint8_t ID_Data_reg = 0x06;
+const uint8_t GIO1_Pin_Control_reg1 = 0x0b;
 const uint8_t PLL_reg1 = 0x0f;
 const uint8_t IDL_reg = 0x1F;
 const uint8_t VCO_current_calibration_reg = 0x24;
@@ -353,23 +354,26 @@ void A7105_calibrate(void)
 
 void A7105_continuous_TX(void)
 {
+    //PA6-GIO1 as output
+    GPIOA->MODER |= ( 0b01 << GPIO_MODER_MODER6_Pos );
+
     //Continuous TX test
     //0b1000 0000 = 0x80
-    //FMS=0 direct mode FMT=0, WWSE=0, DCFC=0, AIF=0, ARSSI=0, DDPC=1(SDIO as modulation drive pin)
-    A7105_write_reg(Mode_control_reg, 0x80);
+    //FMS=0 direct mode FMT=0, WWSE=0, DCFC=0, AIF=0, ARSSI=0, DDPC=0(SDIO as modulation drive pin disabled)
+    A7105_write_reg(Mode_control_reg, 0x00);
     A7105_write_reg( PLL_reg1, 0x00); //Set Channel 0 it means 2400MHz+0
+    A7105_write_reg(GIO1_Pin_Control_reg1, (0x9<<2)| 0x01); //TXD direct mode
     A7105_strobe(A7105_STROBE_TX);
+    uint8_t val;
+    val = A7105_read_reg(Mode_reg);
+    printf("Mode reg(0x00): %02x\n\r", val);
+    printf("Continuous TX activated\n\r");
 
     while(1)
     {
         led_toogle();
-        SDIO_set_state(0);
+        GPIOA->ODR ^= GPIO_ODR_6;
         delay();
-        SDIO_set_state(1);
-        delay();
-        // uint8_t val;
-        // val = A7105_read_reg(Mode_reg);
-        // printf("Mode reg: %02x\n\r", val);
     }
 }
 
