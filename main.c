@@ -68,6 +68,11 @@ static inline void SDIO_set_state(bool x)
     }
 }
 
+static inline bool GIO1_get_state(void)
+{
+    return ( GPIOA->IDR&GPIO_ODR_6) != 0;
+}
+
 void init_3wire_gpio(void)
 {
     RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
@@ -425,26 +430,33 @@ int main( void )
 {
     led_init();
     USART_init( USART1, 112500 );
-    printf("Hell World printf\n\r");
+    printf("Hello World printf\n\r");
     init_3wire_gpio();
     printf("3wire initialised!\n\r");
     delay();
     A7105_init();
     A7105_calibrate();
 
-    A7105_continuous_TX_hops();
-    
+    // A7105_continuous_TX_hops();
+    A7105_strobe(A7105_STROBE_STANDBY);
+    A7105_strobe(A7105_STROBE_RST_RDPTR);
+    //Binding packets are received on ch0
+    A7105_write_reg( PLL_reg1, 0x00); //Set Channel 0 it means 2400MHz+0
+    A7105_strobe(A7105_STROBE_RX);
 
     while( 1 )
     {
         led_toogle();
-        delay();
-        uint8_t val;
-        val = A7105_read_reg(battery_detect_reg);
-        printf("Battery: %02x\n\r", val);
-        val = A7105_read_reg(RScale_reg);
-        printf("Rscale: %02x\n\r", val);
-        
+        if(GIO1_get_state()) //Packet REceived
+        {
+            printf("RX\n\r");
+            uint8_t val = A7105_read_reg(Mode_reg);
+            printf("Mode reg(0x00): %02x\n\r", val);
+            if((val&(1<<5)) == 0) //CRC ok, CRCF bit cleared
+            {
+                printf("CRC ok \n\r");
+            }
+        }
     }
     return 0;
 }
