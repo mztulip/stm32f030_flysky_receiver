@@ -336,9 +336,9 @@ void A7105_init(void)
     //RXDI=0(RX data output not inverted) FC=0(frequency compensation disabled), RXSM[1:0]=0b11(internal usage should be 11)
     A7105_write_reg(0x19, 0x80);//RX gain register 1, LGC[2:0]=0(LNA gain 24dB), MGC[1:0]=0(mixer gain 24dB),
     //IGC=0(internal should be 0), MVGS=1(recommended val, manual VGA calibrate) VGA(variable gain amplifiers, placed after IF filter)
-    A7105_write_reg(0x1a, 0xff); //RX gain register 2 for internal use, should be 0x0a, multi have 0x80, mbed hax 0x80
-    A7105_write_reg(0x1b, 0xff); //Rx gain register 3 for internal use, should be 0xb4, multi have 0x00, mbed, 0x00
-    A7105_write_reg(0x1c, 0x2a); //Rx gain register 4, for internal use, should be 0x8e, multi,mbed, 0x0a
+    A7105_write_reg(0x1a, 0x80); //RX gain register 2 for internal use, should be 0x0a, multi have 0x80, mbed hax 0x80
+    A7105_write_reg(0x1b, 0x00); //Rx gain register 3 for internal use, should be 0xb4, multi have 0x00, mbed, 0x00
+    A7105_write_reg(0x1c, 0x0a); //Rx gain register 4, for internal use, should be 0x8e, multi,mbed, 0x0a
     A7105_write_reg(0x1d, 0x32); //RSSI threshold register, 
     A7105_write_reg(0x1e, 0xc3); //0b1100 0011 ADC Control register, CDM=1(RSSI continuous) RSS=1(RSSI od carrier detect, only one option)
     //XADS=0 (convert RSS signal, only one option), FSARS=0(ADC clk 4Mhz) ERSS=0(RSSI measuerement until RX mode) RSM[1:0]=11(RSSI margin 20, recommended val)
