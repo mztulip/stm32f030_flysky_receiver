@@ -148,6 +148,7 @@ uint8_t A7105_read_reg(uint8_t address)
 const uint8_t Mode_reg = 0x0;
 const uint8_t Mode_control_reg = 0x1;
 const uint8_t Calibration_control_reg = 0x02;
+const uint8_t fifo_data_reg = 0x05;
 const uint8_t ID_Data_reg = 0x06;
 const uint8_t GIO1_Pin_Control_reg1 = 0x0b;
 const uint8_t PLL_reg1 = 0x0f;
@@ -156,6 +157,7 @@ const uint8_t VCO_current_calibration_reg = 0x24;
 const uint8_t VCO_single_band_cal_reg1 = 0x25;
 const uint8_t VCO_single_band_cal_reg2 = 0x26;
 const uint8_t battery_detect_reg = 0x27;
+const uint8_t tx_test_reg = 0x28;
 const uint8_t RScale_reg = 0x31;
 
 enum A7105_Command {
@@ -485,6 +487,72 @@ void A7105_continuous_TX_hops(void)
     }
 }
 
+void A7105_write_byte(uint8_t byte)
+{
+    for(int i = 0x80 ; i != 0;i=i>>1)
+    {
+        bool bit = i&byte;
+        SDIO_set_state(bit);
+        SCK_high();
+        SCK_low();
+    }
+}
+
+void A7105_write_packet_fifo(void)
+{
+    select_a7105(false);
+    SCK_low();
+    SDIO_output();
+    SDIO_set_state(0);
+    select_a7105(true);
+    //bit 7 command bit 0-register 1-strobe
+    //bit6 R/W bit 1-read 0 -write
+    A7105_write_byte(fifo_data_reg);
+    A7105_write_byte(0xAA);
+    uint32_t id = 0x12345678;
+    A7105_write_byte(id&0xff);
+    A7105_write_byte((id >> 8)&0xff);
+    A7105_write_byte((id >> 16)&0xff);
+    A7105_write_byte((id >> 24)&0xff);
+    //5 bytes until now
+    for(int i=0; i < 16;i++)
+    {
+        A7105_write_byte(0x55);
+    }
+    //Total 21 bytes
+
+    select_a7105(false);
+}
+
+void A7105_frames_TX(void)
+{
+    A7105_write_reg(tx_test_reg,0x1F);//set power to 1db maximum
+    A7105_strobe(A7105_STROBE_STANDBY);
+
+    A7105_write_ID(0x5475c52A);
+    printf("Reading ID\n\r");
+    uint32_t id_result = 0x12345678;
+    id_result = A7105_read_ID();
+    printf("\033[32mFrame id set to: %lx\033[0m\n\r", id_result);
+    if(id_result != 0x5475c52A)
+    {
+        printf("\033[31mError: Frame id set failed\033[0m\n\r");
+        delay();
+        NVIC_SystemReset();
+    }
+    A7105_write_reg( PLL_reg1, 0x01); //Set Channel 1 it means 2400MHz+0,47MHz
+    while(1)
+    {
+        A7105_strobe(A7105_STROBE_STANDBY);
+        A7105_strobe(A7105_STROBE_RST_WRPTR);
+        A7105_write_packet_fifo();
+        A7105_strobe(A7105_STROBE_TX);
+        printf("TX\r\n");
+        for( uint32_t x=0; x<10e3; x++) ;
+    }
+
+}
+
 uint32_t sys_tick_count=0;
 void SysTick_Handler(void)
 {
@@ -508,6 +576,9 @@ int main( void )
     A7105_init();
     A7105_calibrate();
 
+    A7105_frames_TX();
+    // A7105_continuous_TX_hops();
+
     A7105_write_ID(0x5475c52A);
     printf("Reading ID\n\r");
     uint32_t id_result = 0x12345678;
@@ -519,8 +590,6 @@ int main( void )
         delay();
         NVIC_SystemReset();
     }
-
-    // A7105_continuous_TX_hops();
     A7105_strobe(A7105_STROBE_STANDBY);
     A7105_strobe(A7105_STROBE_RST_RDPTR);
     //Binding packets are received on ch0
