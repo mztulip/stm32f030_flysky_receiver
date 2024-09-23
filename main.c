@@ -485,14 +485,23 @@ void A7105_continuous_TX_hops(void)
     }
 }
 
+uint32_t sys_tick_count=0;
+void SysTick_Handler(void)
+{
+  sys_tick_count++;
+}
 
 //STM32F030K6T6
 //USART1_Tx = PA2 (pin 8)
 int main( void )
 {
+    //By default internal 8MHz RC(HSI)
     led_init();
     USART_init( USART1, 112500 );
     printf("Hello World printf\n\r");
+    uint32_t ticks_to_interrupts = 8000000/1000;//1ms
+    //SYStick uses HCLK=8MHz(HPRE=0 HCLK=SYSCLK/1 with HSI as source for SYSCLK)
+    SysTick_Config(ticks_to_interrupts);
     init_3wire_gpio();
     printf("3wire initialised!\n\r");
     delay();
@@ -507,7 +516,8 @@ int main( void )
     if(id_result != 0x5475c52A)
     {
         printf("\033[31mError: Frame id set failed\033[0m\n\r");
-        //TODO reboot
+        delay();
+        NVIC_SystemReset();
     }
 
     // A7105_continuous_TX_hops();
