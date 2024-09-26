@@ -82,8 +82,8 @@ void init_3wire_gpio(void)
     GPIOA->MODER |= GPIO_MODER_MODER5_0;
     // SDIO PA7
     // GPIOA->MODER |= GPIO_MODER_MODER7_0;
-    // GIO1 PA6
-    GPIOA->MODER |= GPIO_MODER_MODER6_0;
+    // GIO1 PA6 Input
+    GPIOA->MODER &= ~GPIO_MODER_MODER6_Msk;
     //SCS PA4 General purpose output mode
     GPIOA->MODER |= ( 0b01 << GPIO_MODER_MODER4_Pos );
 
@@ -151,8 +151,11 @@ const uint8_t Calibration_control_reg = 0x02;
 const uint8_t fifo_data_reg = 0x05;
 const uint8_t ID_Data_reg = 0x06;
 const uint8_t GIO1_Pin_Control_reg1 = 0x0b;
+const uint8_t GIO2_Pin_Control_reg2 = 0x0c;
 const uint8_t PLL_reg1 = 0x0f;
+const uint8_t RSSI_threshold_reg = 0x1D;
 const uint8_t IDL_reg = 0x1F;
+const uint8_t IF_calibration_reg1 = 0x22;
 const uint8_t VCO_current_calibration_reg = 0x24;
 const uint8_t VCO_single_band_cal_reg1 = 0x25;
 const uint8_t VCO_single_band_cal_reg2 = 0x26;
@@ -301,11 +304,11 @@ void A7105_init(void)
 
     A7105_write_reg(0, 0xff); //As in A7105 Reference code for FIFO mode
     //Crystal A7105= 16MHz=Fxtal
-    // FMS=1(FIFO mode) AIF=0(Auto IF offset for RX)
+    // FMS=1(FIFO mode) AIF=1(Auto IF offset for RX)
     // ARSSI = 1( Enable RSSI measurement in RX mode)
-    A7105_write_reg(1, 0x42); // mbed, multimodule have 0x42
+    A7105_write_reg(1, 0x42); // mbed, multimodule have 0x42, ADCM=0(adc measure disable), FMS=1(fifo mode), ARRS=1(when rxmode rssi auto measure)
     A7105_write_reg(2, 0); //Calibs disable
-    A7105_write_reg(3, 0x14); //FIFO End pointer set, todo change, 20 bytes
+    A7105_write_reg(3, 0x14); //FIFO End pointer set, 21 bytes flysky frame contains 21bytes
     A7105_write_reg(4, 0); //Fifo pointer margin
     A7105_write_reg(5, 0xff); //FIFO data 
     A7105_write_reg(6, 0xff); //ID Data
@@ -319,7 +322,7 @@ void A7105_init(void)
     A7105_write_reg(13, 0x05);//Clock register, XS=1(Crystal), CGS=0 (disable internal 32MHz PLL)
     //CSC[1:0]=01(syclk divider Fsys=FMCLK/2=16MHz),GRC[3:0]=0b000(clock generation reference counter)
     A7105_write_reg(14, 0x00);//Data rate register, Data rate = Fsysclk/32/(SDR+1), SDR=0 Datarete=16MHz/32/1=0.5MHz
-    A7105_write_reg(15, 50); //PLL register 1, CHN[7:0]=50 (LO channel number), this is overwritten later
+    A7105_write_reg(15, 0x50); //PLL register 1, CHN[7:0]=50 (LO channel number), this is overwritten later
 
     A7105_write_reg(0x10, 0x9e);//1001 1110, PLL register 2, BIP8=0, CHR[3:0]=0b1111(16) 
     //RRC[1:0]=0b00(FPLL=Fxref/1=32MHz) DBL=1(FXREF=2xFxtal=32MHz=FMclk)     Freq=2400+32*50(CHN)/(4*(16+1))=2400+1600/68=2400+23
@@ -377,24 +380,40 @@ void A7105_init(void)
     A7105_strobe(A7105_STROBE_STANDBY);
 }
 
-void A7105_calibrate(void)
+//Calibration Control reg(0x02) bits
+const uint8_t FBC_bit = 0x01;
+const uint8_t VBC_bit = (1<<1);
+const uint8_t VCC_bit = (1<<2);
+
+void A7105_IF_calibrate(void)
 {
     //IF Filter Bank Calibration
-    A7105_write_reg( Calibration_control_reg, 0x01 );
+    A7105_write_reg( Calibration_control_reg, 0x01 ); //FBC=1(bit0)
     while ( A7105_read_reg(Calibration_control_reg) ); //wait calibration end
 
-    //VCO Current Calibration manual, I found that others do it in that way.
-    A7105_write_reg(VCO_current_calibration_reg, 0x13);
+    uint8_t if_calib = A7105_read_reg(IF_calibration_reg1);
+    const uint8_t FBCF_bit = (1<<4);
+    //FBCF(bit4) checking
+    if(if_calib&FBCF_bit)
+    {
+        printf("IF calibration failed\n\r");
+        delay();
+        NVIC_SystemReset();
+    }
+    else 
+    {
+        printf("IF calibration success. Value:%d\n\r", if_calib&0x04);
+    }
+}
 
-    //VCO Bank Calibration, VDD_A=1.3V, upper threshold, lowe 0.4V
-    A7105_write_reg(VCO_single_band_cal_reg2, 0x03B);
-
-
-    
-    //VCO Bank Calibrate channel 0x00
-    A7105_write_reg( PLL_reg1, 0x00); //Set Channel 0 it means 2400MHz+0
-    A7105_write_reg( Calibration_control_reg, 0x02); //VCO Calibration
-    printf("VCO calibration started with channel 0x0\n\r");
+void A7105_VCO_bank_calibrate(uint8_t channel)
+{
+    //This calibbration uses best VCO bank for calibrated frequency
+    //Calibration only VBC(VCO Bacnk Calibration) because current is manual
+    //VCO Bank Calibrate for channel
+    A7105_write_reg( PLL_reg1, channel); //Set Channel 0 it means 2400MHz+ch*0,47Mhz
+    A7105_write_reg( Calibration_control_reg, VBC_bit); //VCO Calibration VBC=1
+    printf("VCO calibration started with channel: %d\n\r", channel);
     while ( A7105_read_reg(Calibration_control_reg) )//wait calibration end
     {
         delay();
@@ -402,28 +421,34 @@ void A7105_calibrate(void)
     } 
     uint8_t vco_calibration0=A7105_read_reg(VCO_single_band_cal_reg1);
     if(vco_calibration0&0x08)
-    {//VCBS=1 means calibration failed
-        printf("VCO calibration failed with ch0\n\r");
+    {//VBCF=1 means calibration failed
+        printf("VCO calibration failed with channel:%d\n\r", channel);
     }
-    
-    
-    //VCO Bank Calibrate channel 0xA0
-    A7105_write_reg( PLL_reg1, 0xA0); //Set Channel 0xA0
-    A7105_write_reg( Calibration_control_reg, 0x02); //VCO Calibration
-    printf("VCO calibration started with channel 0xA0\n\r");
-    while ( A7105_read_reg(Calibration_control_reg) )//wait calibration end
+    else 
     {
-        delay();
-        printf("Waiting for calibraiton end\n\r");
-    } 
-    vco_calibration0=A7105_read_reg(VCO_single_band_cal_reg1);
-    if(vco_calibration0&0x08)
-    {//VCBS=1 means calibration failed
-        printf("VCO calibration failed with channel 0xA0\n\r");
+        printf("VCO calibration success with channel:%d, val:%d\n\r", channel, vco_calibration0&07);
     }
+}
+
+void A7105_calibrate(void)
+{
+    A7105_strobe(A7105_STROBE_PLL);
+    delay();
+
+    A7105_IF_calibrate();
+    
+    //VCO Current Calibration manual, I found that others do it in that way.
+    A7105_write_reg(VCO_current_calibration_reg, 0x13);// MVCS=1(bit4) VCOC1=1 VCOC0=1
+
+    //VCO Bank Calibration, VDD_A=1.3V, upper threshold, lowe 0.4V
+    A7105_write_reg(VCO_single_band_cal_reg2, 0x03B); //VTH0=1 VTH1=1 VTH2=1 VTL0=1 VTL1=1
+
+    A7105_VCO_bank_calibrate(0x00);
+    A7105_VCO_bank_calibrate(0xA0);
 
     //Switch to manual VCO bank calibration value MVBS=1, WHY?
-    // A7105_write_reg(VCO_single_band_cal_reg1,0x08);
+    A7105_write_reg(VCO_single_band_cal_reg1,0x08);
+
     printf("Calibrations finished\n\r");
 }
 
@@ -559,6 +584,63 @@ void SysTick_Handler(void)
   sys_tick_count++;
 }
 
+void A7105_rx_direct_mode(void)
+{
+    //CD =0(bit4) AIF=0(bit5) ARSSI=1(bit6)
+    A7105_write_reg(Mode_control_reg,(1<<6)); //Direct mode
+    //Enable Direct mode on GIO2
+    A7105_write_reg(GIO2_Pin_Control_reg2, 0x01|((0x07)<<2));
+
+    A7105_strobe(A7105_STROBE_STANDBY);
+    //Binding packets are received on ch0
+    A7105_write_reg( PLL_reg1, 0x01); //Set Channel 0 it means 2400MHz+0
+    A7105_strobe(A7105_STROBE_RX);
+    printf("RX direct mode GIO2\n\r");
+
+    while( 1 )
+    {
+        led_toogle();
+        delay_fast();
+        uint8_t rssi = A7105_read_reg( RSSI_threshold_reg);
+        printf("RSSI: %d\n\r", rssi);
+        
+    }
+}
+
+
+//FRAME format
+// Data RATE = 500kbit/s(500kHz IF bandwidth)
+// 32 bits preamble # 4 bytes id #  
+void A7105_rx_fifo_mode(void)
+{
+    while( 1 )
+    {
+        led_toogle();
+        A7105_strobe(A7105_STROBE_STANDBY);
+        A7105_strobe(A7105_STROBE_RST_RDPTR);
+        A7105_write_reg( PLL_reg1, 0x00); //Set Channel 0 it means 2400MHz+0
+        A7105_strobe(A7105_STROBE_RX);
+        while(GIO1_get_state() != true) {} //Wait for rx mode
+        printf("Waiting for radio frame\n\r");
+        while(GIO1_get_state() != false){} //Falling edge, reception finished
+        printf("RX\n\r");
+    }
+}
+
+void A7105_check_id(uint32_t id)
+{
+    printf("Reading ID\n\r");
+    uint32_t id_result = 0x12345678;
+    id_result = A7105_read_ID();
+    printf("\033[32mFrame id set to: %lx\033[0m\n\r", id_result);
+    if(id_result != id)
+    {
+        printf("\033[31mError: Frame id set failed\033[0m\n\r");
+        delay();
+        NVIC_SystemReset();
+    }
+}
+
 //STM32F030K6T6
 //USART1_Tx = PA2 (pin 8)
 int main( void )
@@ -573,43 +655,25 @@ int main( void )
     init_3wire_gpio();
     printf("3wire initialised!\n\r");
     delay();
+
+
+    A7105_write_reg(0x00,0x00);//reset A7105
+    uint32_t id = 0x5475c52A;
+    // uint32_t id = 0x1d714aaa;
+    // uint32_t id = 0xaaa417d1;
+    // uint32_t id = 0x3ae2a555;
+    // uint32_t id = 0x55a2ea3;
+    A7105_write_ID(id);
+    //0101 0100 0111 0101 1100 0101 0010 1010
+    A7105_check_id(id);
+
     A7105_init();
     A7105_calibrate();
 
-    A7105_frames_TX();
+    // A7105_frames_TX();
     // A7105_continuous_TX_hops();
+    A7105_rx_direct_mode();
+    // A7105_rx_fifo_mode();
 
-    A7105_write_ID(0x5475c52A);
-    printf("Reading ID\n\r");
-    uint32_t id_result = 0x12345678;
-    id_result = A7105_read_ID();
-    printf("\033[32mFrame id set to: %lx\033[0m\n\r", id_result);
-    if(id_result != 0x5475c52A)
-    {
-        printf("\033[31mError: Frame id set failed\033[0m\n\r");
-        delay();
-        NVIC_SystemReset();
-    }
-    A7105_strobe(A7105_STROBE_STANDBY);
-    A7105_strobe(A7105_STROBE_RST_RDPTR);
-    //Binding packets are received on ch0
-    A7105_write_reg( PLL_reg1, 0x00); //Set Channel 0 it means 2400MHz+0
-    A7105_strobe(A7105_STROBE_RX);
-    printf("Waiting for radio frame\n\r");
-
-    while( 1 )
-    {
-        led_toogle();
-        if(GIO1_get_state()) //Packet REceived
-        {
-            printf("RX\n\r");
-            uint8_t val = A7105_read_reg(Mode_reg);
-            printf("Mode reg(0x00): %02x\n\r", val);
-            if((val&(1<<5)) == 0) //CRC ok, CRCF bit cleared
-            {
-                printf("CRC ok \n\r");
-            }
-        }
-    }
     return 0;
 }
