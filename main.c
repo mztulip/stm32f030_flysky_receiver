@@ -122,7 +122,7 @@ uint8_t A7105_read_reg(uint8_t address)
     select_a7105(true);
     //bit 7 command bit 0-register 1-strobe
     //bit6 R/W bit 1-read 0 -write
-    uint8_t addr = (address|=0x40);
+    uint8_t addr = (address|0x40);
     for(int i = 0x80 ; i != 0;i=i>>1)
     {
         bool bit = i&addr;
@@ -173,6 +173,43 @@ enum A7105_Command {
     A7105_STROBE_RST_WRPTR = 0xE0,
     A7105_STROBE_RST_RDPTR = 0xF0,
 };
+
+uint8_t rx_packet_buffer[21];
+
+uint8_t A7105_read_packet(void)
+{ 
+	uint16_t result = 0;
+    select_a7105(false);
+    SCK_low();
+    SDIO_output();
+    SDIO_set_state(0);
+    select_a7105(true);
+    //bit 7 command bit 0-register 1-strobe
+    //bit6 R/W bit 1-read 0 -write
+    uint8_t addr = (fifo_data_reg | 0x40);//reading fifo reg
+    for(int i = 0x80 ; i != 0;i=i>>1)
+    {
+        bool bit = i&addr;
+        SDIO_set_state(bit);
+        SCK_high();
+        SCK_low();
+    }
+    SDIO_input();
+    for(int bytes_index = 0; bytes_index < 21;bytes_index++)
+    {
+        for(int i = 0x80 ; i != 0;i=i>>1)
+        {
+            SCK_high();
+            if(SDIO_get_state())
+            {
+                rx_packet_buffer[bytes_index] |= i;
+            }
+            SCK_low();
+        }
+    }
+    select_a7105(false);
+	return(result); 
+}
 
 bool A7105_presence_test(void)
 {
@@ -592,17 +629,20 @@ void A7105_rx_direct_mode(void)
     A7105_write_reg(GIO2_Pin_Control_reg2, 0x01|((0x07)<<2));
 
     A7105_strobe(A7105_STROBE_STANDBY);
-    //Binding packets are received on ch0
-    A7105_write_reg( PLL_reg1, 0x01); //Set Channel 0 it means 2400MHz+0
+    //Select reception channel
+    A7105_write_reg( PLL_reg1, 0x00);
     A7105_strobe(A7105_STROBE_RX);
     printf("RX direct mode GIO2\n\r");
-
+    //Frames are sent usually every 1.5ms or 10ms
+    //therefore oscillscope time scale should be set to 5ms to easily find frame
     while( 1 )
     {
         led_toogle();
         delay_fast();
         uint8_t rssi = A7105_read_reg( RSSI_threshold_reg);
         printf("RSSI: %d\n\r", rssi);
+        //Small values represents used channel, by default values are from 120-150
+        //When frame is transmitted values is about 10-20
         
     }
 }
@@ -610,7 +650,9 @@ void A7105_rx_direct_mode(void)
 
 //FRAME format
 // Data RATE = 500kbit/s(500kHz IF bandwidth)
-// 32 bits preamble # 4 bytes id #  
+// Bind packet
+// 32 bits preamble # 4 bytes id #  0xaa(1byte) # TX_id(4bytes) # channels data(16 bytes)# CRC(2bytes)
+// In fifo is placed 21 bytes
 void A7105_rx_fifo_mode(void)
 {
     while( 1 )
@@ -623,7 +665,24 @@ void A7105_rx_fifo_mode(void)
         while(GIO1_get_state() != true) {} //Wait for rx mode
         printf("Waiting for radio frame\n\r");
         while(GIO1_get_state() != false){} //Falling edge, reception finished
-        printf("RX\n\r");
+        printf("RX ");
+        const uint8_t CRCF_bit = (1<<5);
+        uint8_t mod_reg = A7105_read_reg( Mode_reg);
+        if(mod_reg&CRCF_bit)
+        {
+            printf("CRC error\n\r");
+        }
+        else 
+        {
+            printf("CRC ok\n\r");
+        }
+        A7105_read_packet();
+        printf("Packet data: ");
+        for(int i = 0 ; i < 21;i++)
+        {
+            printf("[%d]0x%02x ",i, rx_packet_buffer[i]);
+        }
+        printf("\n\r");
     }
 }
 
@@ -672,8 +731,8 @@ int main( void )
 
     // A7105_frames_TX();
     // A7105_continuous_TX_hops();
-    A7105_rx_direct_mode();
-    // A7105_rx_fifo_mode();
+    // A7105_rx_direct_mode();
+    A7105_rx_fifo_mode();
 
     return 0;
 }
